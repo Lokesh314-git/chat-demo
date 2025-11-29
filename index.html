@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Real-Time Chat</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#3498db">
+    <script type="module" src="app.js"></script>
+</head>
+<body>
+    <!-- Auth Modal -->
+    <div id="authModal" class="modal">
+        <div class="modal-content auth-content">
+            <div class="auth-tabs">
+                <button class="tab-btn active" data-tab="login">Login</button>
+                <button class="tab-btn" data-tab="register">Register</button>
+            </div>
+            
+            <!-- Login Form -->
+            <div id="loginTab" class="auth-tab active">
+                <h2>Welcome Back!</h2>
+                <form id="loginForm">
+                    <div class="input-group">
+                        <input type="text" id="loginId" placeholder="User ID or Email" required>
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div class="input-group">
+                        <input type="password" id="loginPassword" placeholder="Password" required>
+                        <i class="fas fa-lock"></i>
+                    </div>
+                    <button type="submit" class="auth-btn">
+                        <i class="fas fa-sign-in-alt"></i> Login
+                    </button>
+                </form>
+            </div>
+            
+            <!-- Register Form -->
+            <div id="registerTab" class="auth-tab">
+                <h2>Create Account</h2>
+                <form id="registerForm">
+                    <div class="input-group">
+                        <input type="text" id="regName" placeholder="Full Name" required>
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div class="input-group">
+                        <input type="text" id="regUserId" placeholder="Unique User ID" required>
+                        <i class="fas fa-id-card"></i>
+                        <div class="validation-message" id="userIdValidation"></div>
+                    </div>
+                    <div class="input-group">
+                        <input type="email" id="regEmail" placeholder="Email Address" required>
+                        <i class="fas fa-envelope"></i>
+                    </div>
+                    <div class="input-group">
+                        <input type="password" id="regPassword" placeholder="Password" required>
+                        <i class="fas fa-lock"></i>
+                    </div>
+                    <div class="input-group">
+                        <input type="password" id="regConfirmPassword" placeholder="Confirm Password" required>
+                        <i class="fas fa-lock"></i>
+                        <div class="validation-message" id="passwordValidation"></div>
+                    </div>
+                    <button type="submit" class="auth-btn">
+                        <i class="fas fa-user-plus"></i> Register
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App (Hidden until authenticated) -->
+    <div id="appContainer" class="app-container" style="display: none;">
+        <!-- Mobile Menu Button -->
+        <div class="mobile-menu-btn" id="mobileMenuBtn">
+            <i class="fas fa-bars"></i>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="user-profile">
+                    <img src="https://ui-avatars.com/api/?name=User&background=3498db&color=fff" 
+                         alt="Profile" class="profile-pic" id="userProfilePic">
+                    <div class="user-info">
+                        <span id="sidebarUserName">User</span>
+                        <span class="user-status online">Online</span>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button class="notification-btn" id="notificationBtn">
+                        <i class="fas fa-bell"></i>
+                    </button>
+                    <button class="logout-btn" id="logoutBtn">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Search Users -->
+            <div class="search-section">
+                <div class="input-group">
+                    <input type="text" id="searchUsers" placeholder="Search users...">
+                    <i class="fas fa-search"></i>
+                </div>
+                <div class="search-results" id="searchResults"></div>
+            </div>
+
+            <!-- Rooms Section -->
+            <div class="rooms-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-hashtag"></i> Public Rooms</h3>
+                </div>
+                <div class="room-list" id="publicRooms"></div>
+                
+                <div class="section-header">
+                    <h3><i class="fas fa-plus-circle"></i> Create Private Room</h3>
+                </div>
+                <button id="createRoomBtn" class="create-room-btn">
+                    <i class="fas fa-plus"></i> New Room
+                </button>
+                
+                <div class="section-header">
+                    <h3><i class="fas fa-sign-in-alt"></i> Join Private Room</h3>
+                </div>
+                <div class="join-room">
+                    <input type="text" id="roomCodeInput" placeholder="Enter 6-digit code" maxlength="6">
+                    <button id="joinRoomBtn"><i class="fas fa-arrow-right"></i></button>
+                </div>
+
+                <div class="section-header">
+                    <h3><i class="fas fa-users"></i> Your Rooms</h3>
+                </div>
+                <div class="room-list" id="privateRooms"></div>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div class="main-content">
+            <div class="chat-header">
+                <div class="room-info">
+                    <h1 id="currentRoomName">Select a Room</h1>
+                    <div class="room-meta">
+                        <span id="roomCodeDisplay"></span>
+                        <span class="online-count" id="onlineCount"></span>
+                    </div>
+                </div>
+                <div class="room-actions">
+                    <button id="roomMembersBtn" class="members-btn">
+                        <i class="fas fa-users"></i>
+                        <span id="membersCount">0</span>
+                    </button>
+                    <button id="deleteRoomBtn" class="delete-btn" style="display: none;">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Members Panel -->
+            <div class="members-panel" id="membersPanel">
+                <div class="panel-header">
+                    <h3>Room Members</h3>
+                    <button class="close-panel" id="closeMembersPanel">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="members-list" id="membersList"></div>
+            </div>
+            
+            <div class="messages-container" id="messagesContainer">
+                <div class="welcome-message">
+                    <i class="fas fa-comments fa-3x"></i>
+                    <h3>Welcome to Advanced Chat!</h3>
+                    <p>Select a room or create your own to start chatting</p>
+                </div>
+            </div>
+            
+            <div class="typing-indicator" id="typingIndicator"></div>
+            
+            <div class="input-container">
+                <div class="input-wrapper">
+                    <input type="text" id="messageInput" placeholder="Type your message..." disabled>
+                    <div class="reaction-picker" id="reactionPicker" style="display: none;">
+                        <span class="reaction-option" data-emoji="👍">👍</span>
+                        <span class="reaction-option" data-emoji="❤️">❤️</span>
+                        <span class="reaction-option" data-emoji="😂">😂</span>
+                        <span class="reaction-option" data-emoji="😮">😮</span>
+                        <span class="reaction-option" data-emoji="😢">😢</span>
+                        <span class="reaction-option" data-emoji="🎉">🎉</span>
+                    </div>
+                    <button id="reactionBtn" class="reaction-btn" disabled>
+                        <i class="fas fa-smile"></i>
+                    </button>
+                    <button id="sendButton" disabled>
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Room Creation Modal -->
+    <div id="roomModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Create New Room</h2>
+            <input type="text" id="newRoomName" placeholder="Enter room name" maxlength="30">
+            <div class="modal-actions">
+                <button id="confirmCreateRoom">Create Room</button>
+                <button id="cancelCreateRoom">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Settings Modal -->
+    <div id="notificationModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Notification Settings</h2>
+            <div class="notification-settings">
+                <div class="setting-item">
+                    <label>Push Notifications</label>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="pushNotificationsToggle" checked>
+                        <span class="slider"></span>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>Sound</label>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="soundToggle" checked>
+                        <span class="slider"></span>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>Desktop Notifications</label>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="desktopNotificationsToggle" checked>
+                        <span class="slider"></span>
+                    </div>
+                </div>
+                <button id="testNotificationBtn" class="test-notification-btn">
+                    <i class="fas fa-bell"></i> Test Notification
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Screen -->
+    <div id="loadingScreen" class="loading-screen">
+        <div class="loading-spinner"></div>
+        <p>Loading your chat experience...</p>
+    </div>
+
+    <!-- Push Notification Container -->
+    <div id="pushNotificationContainer" class="push-notification-container"></div>
+</body>
+</html>
