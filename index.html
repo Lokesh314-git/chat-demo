@@ -2,12 +2,16 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Advanced Real-Time Chat</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#3498db">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ChatApp">
+    <meta name="mobile-web-app-capable" content="yes">
     <script type="module" src="app.js"></script>
 </head>
 <body>
@@ -78,6 +82,9 @@
             <i class="fas fa-bars"></i>
         </div>
 
+        <!-- Sidebar Overlay -->
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
         <!-- Sidebar -->
         <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
@@ -144,29 +151,29 @@
                     <h1 id="currentRoomName">Select a Room</h1>
                     <div class="room-meta">
                         <span id="roomCodeDisplay"></span>
-                        <span class="online-count" id="onlineCount"></span>
                     </div>
                 </div>
                 <div class="room-actions">
-                    <button id="roomMembersBtn" class="members-btn">
-                        <i class="fas fa-users"></i>
-                        <span id="membersCount">0</span>
-                    </button>
+                    <!-- Dropdown menu for online users -->
+                    <div class="dropdown-menu">
+                        <button class="menu-btn" id="menuBtn">
+                            <i class="fas fa-ellipsis-v"></i>
+                        </button>
+                        <div class="dropdown-content" id="dropdownContent">
+                            <div class="dropdown-header">
+                                <h4>Room Members</h4>
+                                <span class="close-dropdown" id="closeDropdown">&times;</span>
+                            </div>
+                            <div class="dropdown-body">
+                                <div class="members-list" id="membersList"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <button id="deleteRoomBtn" class="delete-btn" style="display: none;">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
-            </div>
-            
-            <!-- Members Panel -->
-            <div class="members-panel" id="membersPanel">
-                <div class="panel-header">
-                    <h3>Room Members</h3>
-                    <button class="close-panel" id="closeMembersPanel">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                <div class="members-list" id="membersList"></div>
             </div>
             
             <div class="messages-container" id="messagesContainer">
