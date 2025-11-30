@@ -1364,3 +1364,82 @@ input:checked + .slider:before {
 .dropdown-body::-webkit-scrollbar-thumb:hover {
     background: var(--accent-color);
 }
+
+
+
+
+
+
+
+
+/* Add these styles to your existing CSS */
+
+/* Connection Status */
+.connection-status {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    padding: 8px 12px;
+    border-radius: 20px;
+    font-size: 0.8em;
+    z-index: 1000;
+    transition: all 0.3s ease;
+}
+
+.connection-status.online {
+    background: #27ae60;
+    color: white;
+}
+
+.connection-status.offline {
+    background: #e74c3c;
+    color: white;
+}
+
+/* Loading states */
+.loading {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 20px;
+}
+
+.error {
+    text-align: center;
+    color: #e74c3c;
+    padding: 20px;
+}
+
+.no-messages {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 40px 20px;
+    font-style: italic;
+}
+
+/* Enhanced mobile styles */
+@media (max-width: 768px) {
+    .sidebar-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 998;
+    }
+    
+    .sidebar-overlay.active {
+        display: block;
+    }
+}
+
+/* Message actions hover effect */
+.message-actions {
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.message:hover .message-actions {
+    opacity: 1;
+}
