@@ -97,12 +97,13 @@ const searchUsers = document.getElementById('searchUsers');
 const searchResults = document.getElementById('searchResults');
 const mobileMenuBtn = document.getElementById('mobileMenuBtn');
 const sidebar = document.getElementById('sidebar');
-const roomMembersBtn = document.getElementById('roomMembersBtn');
-const membersPanel = document.getElementById('membersPanel');
-const closeMembersPanel = document.getElementById('closeMembersPanel');
+const draftIndicator = document.getElementById('draftIndicator');
+
+// Dropdown menu elements
+const menuBtn = document.getElementById('menuBtn');
+const dropdownContent = document.getElementById('dropdownContent');
+const closeDropdown = document.getElementById('closeDropdown');
 const membersList = document.getElementById('membersList');
-const membersCount = document.getElementById('membersCount');
-const onlineCount = document.getElementById('onlineCount');
 
 // Global variables
 let currentUser = null;
@@ -116,6 +117,8 @@ let typingListener = null;
 let onlineStatusListener = null;
 let roomMembersListener = null;
 let notificationListener = null;
+let draftSaveTimeout = null;
+let sidebarOverlay = null;
 
 // Public rooms configuration
 const PUBLIC_ROOMS = [
@@ -130,6 +133,71 @@ async function initApp() {
     checkAuthState();
     setupEventListeners();
     setupNotificationHandler();
+    setupMobileKeyboardBehavior();
+    setupMobileMenu();
+}
+
+// Setup mobile menu with overlay
+function setupMobileMenu() {
+    // Get overlay element
+    sidebarOverlay = document.getElementById('sidebarOverlay');
+    
+    // Overlay click handler
+    sidebarOverlay.addEventListener('click', () => {
+        closeSidebar();
+    });
+    
+    // Close sidebar when clicking on main content (except the mobile menu button)
+    document.querySelector('.main-content').addEventListener('click', (e) => {
+        if (!e.target.closest('#mobileMenuBtn') && window.innerWidth <= 768) {
+            closeSidebar();
+        }
+    });
+}
+
+// Toggle sidebar with overlay
+function toggleSidebar() {
+    sidebar.classList.toggle('open');
+    sidebarOverlay.classList.toggle('active');
+    
+    // Prevent body scroll when sidebar is open
+    if (sidebar.classList.contains('open')) {
+        document.body.classList.add('modal-open');
+    } else {
+        document.body.classList.remove('modal-open');
+    }
+}
+
+// Close sidebar function
+function closeSidebar() {
+    sidebar.classList.remove('open');
+    sidebarOverlay.classList.remove('active');
+    document.body.classList.remove('modal-open');
+}
+
+// Setup mobile keyboard behavior
+function setupMobileKeyboardBehavior() {
+    // Handle viewport changes on mobile
+    if ('visualViewport' in window) {
+        const visualViewport = window.visualViewport;
+        
+        visualViewport.addEventListener('resize', function() {
+            // When keyboard opens, scroll to keep input visible
+            if (visualViewport.height < window.innerHeight) {
+                setTimeout(() => {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }, 100);
+            }
+        });
+    }
+
+    // Handle focus on message input
+    messageInput.addEventListener('focus', function() {
+        // Small delay to ensure keyboard is fully open
+        setTimeout(() => {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }, 300);
+    });
 }
 
 // Initialize Firebase Messaging
@@ -473,10 +541,6 @@ function setupEventListeners() {
     // Mobile menu
     mobileMenuBtn.addEventListener('click', toggleSidebar);
 
-    // Room members panel
-    roomMembersBtn.addEventListener('click', toggleMembersPanel);
-    closeMembersPanel.addEventListener('click', toggleMembersPanel);
-
     // Search users
     searchUsers.addEventListener('input', handleSearchUsers);
 
@@ -493,6 +557,26 @@ function setupEventListeners() {
         closeBtn.addEventListener('click', (e) => {
             e.target.closest('.modal').style.display = 'none';
         });
+    });
+
+    // Dropdown menu
+    menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdownContent.classList.toggle('show');
+        if (dropdownContent.classList.contains('show') && currentRoomId) {
+            loadRoomMembers();
+        }
+    });
+
+    closeDropdown.addEventListener('click', () => {
+        dropdownContent.classList.remove('show');
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!menuBtn.contains(e.target) && !dropdownContent.contains(e.target)) {
+            dropdownContent.classList.remove('show');
+        }
     });
 
     // Existing chat event listeners
@@ -521,9 +605,11 @@ function setupEventListeners() {
         if (e.key === 'Enter') sendMessage();
     });
 
+    // Draft message functionality
     messageInput.addEventListener('input', () => {
         if (currentRoomId && currentUser) {
             updateTypingStatus();
+            saveDraftMessage();
         }
     });
 
@@ -553,9 +639,64 @@ function setupEventListeners() {
     });
 }
 
-// [ALL YOUR EXISTING FUNCTIONS - keeping them the same as before]
-// Auth tab switching, user registration, login, room management, etc.
-// ... (Include all your existing functions here)
+// Save draft message to localStorage
+function saveDraftMessage() {
+    if (!currentRoomId || !currentUser) return;
+    
+    const messageText = messageInput.value.trim();
+    const draftKey = `draft_${currentUser.userId}_${currentRoomId}`;
+    
+    // Clear previous timeout
+    if (draftSaveTimeout) {
+        clearTimeout(draftSaveTimeout);
+    }
+    
+    // Set new timeout to save after 1 second of inactivity
+    draftSaveTimeout = setTimeout(() => {
+        if (messageText) {
+            localStorage.setItem(draftKey, messageText);
+            showDraftIndicator();
+        } else {
+            localStorage.removeItem(draftKey);
+            hideDraftIndicator();
+        }
+    }, 1000);
+}
+
+// Show draft indicator
+function showDraftIndicator() {
+    draftIndicator.style.display = 'flex';
+    setTimeout(() => {
+        draftIndicator.style.display = 'none';
+    }, 2000);
+}
+
+// Hide draft indicator
+function hideDraftIndicator() {
+    draftIndicator.style.display = 'none';
+}
+
+// Load draft message from localStorage
+function loadDraftMessage() {
+    if (!currentRoomId || !currentUser) return;
+    
+    const draftKey = `draft_${currentUser.userId}_${currentRoomId}`;
+    const draftMessage = localStorage.getItem(draftKey);
+    
+    if (draftMessage) {
+        messageInput.value = draftMessage;
+        // Don't show indicator when loading draft
+    }
+}
+
+// Clear draft message
+function clearDraftMessage() {
+    if (!currentRoomId || !currentUser) return;
+    
+    const draftKey = `draft_${currentUser.userId}_${currentRoomId}`;
+    localStorage.removeItem(draftKey);
+    hideDraftIndicator();
+}
 
 // Auth tab switching
 function switchAuthTab(tab) {
@@ -848,19 +989,6 @@ async function updateUserPresence(status) {
     }
 }
 
-// Toggle sidebar on mobile
-function toggleSidebar() {
-    sidebar.classList.toggle('open');
-}
-
-// Toggle members panel
-function toggleMembersPanel() {
-    membersPanel.classList.toggle('open');
-    if (membersPanel.classList.contains('open') && currentRoomId) {
-        loadRoomMembers();
-    }
-}
-
 // Search users and create private chat
 async function handleSearchUsers(e) {
     const searchTerm = e.target.value.trim();
@@ -979,7 +1107,7 @@ function generatePrivateRoomId(userId1, userId2) {
     return `private_${sortedIds[0]}_${sortedIds[1]}`;
 }
 
-// Load room members
+// Load room members for dropdown
 function loadRoomMembers() {
     if (!currentRoomId || !currentRoomData) return;
 
@@ -999,15 +1127,15 @@ function loadRoomMembers() {
             memberItem.className = 'member-item';
             memberItem.innerHTML = `
                 <div class="member-status ${isOnline ? 'online' : 'offline'}"></div>
-                <div class="member-name">${currentRoomData.participants?.[memberId] || memberId}</div>
-                <div class="member-id">@${memberId}</div>
+                <div class="member-info">
+                    <div class="member-name">${currentRoomData.participants?.[memberId] || memberId}</div>
+                    <div class="member-id">@${memberId}</div>
+                </div>
             `;
             membersList.appendChild(memberItem);
         });
-
-        // Update counters
-        membersCount.textContent = currentRoomData.members.length;
-        onlineCount.textContent = `${onlineMembers} online`;
+    } else {
+        membersList.innerHTML = '<div class="no-members">No members in this room</div>';
     }
 }
 
@@ -1198,13 +1326,14 @@ function joinRoom(roomId, roomName, roomType, creator, roomData = null) {
     // Show/hide delete button for room creator
     deleteRoomBtn.style.display = (currentRoomType === 'private' && currentRoomCreator === currentUser.userId && !roomData?.isPrivateChat) ? 'block' : 'none';
     
-    // Show/hide members button for private rooms
-    roomMembersBtn.style.display = currentRoomType === 'private' ? 'flex' : 'none';
-    
     // Enable input
     messageInput.disabled = false;
     sendButton.disabled = false;
     reactionBtn.disabled = false;
+    
+    // Load draft message for this room
+    loadDraftMessage();
+    
     messageInput.focus();
     
     // Load messages
@@ -1218,9 +1347,9 @@ function joinRoom(roomId, roomName, roomType, creator, roomData = null) {
         item.classList.remove('active');
     });
 
-    // Load room members if private room
-    if (currentRoomType === 'private') {
-        loadRoomMembers();
+    // Close sidebar on mobile after selecting room
+    if (window.innerWidth <= 768) {
+        closeSidebar();
     }
 }
 
@@ -1400,7 +1529,7 @@ async function updateTypingStatus() {
     }, 2000);
 }
 
-// Modified sendMessage function to include notifications
+// Modified sendMessage function to include notifications and draft clearing
 async function sendMessage() {
     const messageText = messageInput.value.trim();
     
@@ -1420,6 +1549,9 @@ async function sendMessage() {
             timestamp: serverTimestamp(),
             reactions: {}
         });
+        
+        // Clear draft when message is sent
+        clearDraftMessage();
         
         // Send push notification to other room members
         if (currentRoomData) {
@@ -1512,4 +1644,4 @@ document.addEventListener('DOMContentLoaded', initApp);
 window.testNotification = testNotification;
 window.requestNotificationPermission = requestNotificationPermission;
 
-console.log('Advanced Chat App with Push Notifications Initialized');
+console.log('Advanced Chat App with Mobile Optimization and Dropdown Menu Initialized');
