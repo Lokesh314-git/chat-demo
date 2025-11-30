@@ -16,7 +16,9 @@ import {
     arrayUnion,
     arrayRemove,
     getDocs,
-    writeBatch
+    writeBatch,
+    limit,
+    startAfter
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { 
     getMessaging, 
@@ -120,6 +122,17 @@ let notificationListener = null;
 let draftSaveTimeout = null;
 let sidebarOverlay = null;
 
+// Performance configuration
+const PERFORMANCE_CONFIG = {
+    MESSAGE_BATCH_SIZE: 50,
+    DEBOUNCE_DELAY: 300,
+    TYPING_TIMEOUT: 2000,
+    MESSAGE_CACHE_SIZE: 100
+};
+
+// Message caching
+const messageCache = new Map();
+
 // Public rooms configuration
 const PUBLIC_ROOMS = [
     { id: 'general', name: 'General Chat', type: 'public' },
@@ -135,75 +148,82 @@ async function initApp() {
     setupNotificationHandler();
     setupMobileKeyboardBehavior();
     setupMobileMenu();
+    setupConnectionMonitoring();
 }
 
 // Setup mobile menu with overlay
 function setupMobileMenu() {
-    // Get overlay element
     sidebarOverlay = document.getElementById('sidebarOverlay');
     
-    // Overlay click handler
-    sidebarOverlay.addEventListener('click', () => {
-        closeSidebar();
-    });
-    
-    // Close sidebar when clicking on main content (except the mobile menu button)
-    document.querySelector('.main-content').addEventListener('click', (e) => {
-        if (!e.target.closest('#mobileMenuBtn') && window.innerWidth <= 768) {
+    if (sidebarOverlay) {
+        sidebarOverlay.addEventListener('click', () => {
             closeSidebar();
-        }
-    });
+        });
+    }
+    
+    const mainContent = document.querySelector('.main-content');
+    if (mainContent) {
+        mainContent.addEventListener('click', (e) => {
+            if (!e.target.closest('#mobileMenuBtn') && window.innerWidth <= 768) {
+                closeSidebar();
+            }
+        });
+    }
 }
 
 // Toggle sidebar with overlay
 function toggleSidebar() {
-    sidebar.classList.toggle('open');
-    sidebarOverlay.classList.toggle('active');
-    
-    // Prevent body scroll when sidebar is open
-    if (sidebar.classList.contains('open')) {
-        document.body.classList.add('modal-open');
-    } else {
-        document.body.classList.remove('modal-open');
+    if (sidebar && sidebarOverlay) {
+        sidebar.classList.toggle('open');
+        sidebarOverlay.classList.toggle('active');
+        
+        if (sidebar.classList.contains('open')) {
+            document.body.classList.add('modal-open');
+        } else {
+            document.body.classList.remove('modal-open');
+        }
     }
 }
 
 // Close sidebar function
 function closeSidebar() {
-    sidebar.classList.remove('open');
-    sidebarOverlay.classList.remove('active');
-    document.body.classList.remove('modal-open');
+    if (sidebar && sidebarOverlay) {
+        sidebar.classList.remove('open');
+        sidebarOverlay.classList.remove('active');
+        document.body.classList.remove('modal-open');
+    }
 }
 
 // Setup mobile keyboard behavior
 function setupMobileKeyboardBehavior() {
-    // Handle viewport changes on mobile
     if ('visualViewport' in window) {
         const visualViewport = window.visualViewport;
         
         visualViewport.addEventListener('resize', function() {
-            // When keyboard opens, scroll to keep input visible
             if (visualViewport.height < window.innerHeight) {
                 setTimeout(() => {
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    if (messagesContainer) {
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }
                 }, 100);
             }
         });
     }
 
-    // Handle focus on message input
-    messageInput.addEventListener('focus', function() {
-        // Small delay to ensure keyboard is fully open
-        setTimeout(() => {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }, 300);
-    });
+    if (messageInput) {
+        messageInput.addEventListener('focus', function() {
+            setTimeout(() => {
+                if (messagesContainer) {
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            }, 300);
+        });
+    }
 }
 
 // Initialize Firebase Messaging
 async function initializeMessaging() {
     try {
-        // Register service worker
         if ('serviceWorker' in navigator) {
             try {
                 const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
@@ -218,7 +238,6 @@ async function initializeMessaging() {
             messaging = getMessaging(app);
             console.log('Firebase Messaging is supported');
             
-            // Request notification permission
             await requestNotificationPermission();
         } else {
             console.log('Firebase Messaging is not supported in this browser');
@@ -253,9 +272,8 @@ async function setupFCMToken() {
     try {
         if (!messaging) return;
         
-        // Get the FCM token
         currentFCMToken = await getToken(messaging, {
-            vapidKey: 'BLkCj9b5Y7p1nHxQ2sT8wVzR0mFcA6dE3gL4hN7jK1pX9yM5qW8rT2vB6nZ4cF7a' // Replace with your VAPID key
+            vapidKey: 'BLkCj9b5Y7p1nHxQ2sT8wVzR0mFcA6dE3gL4hN7jK1pX9yM5qW8rT2vB6nZ4cF7a'
         });
         
         if (currentFCMToken) {
@@ -265,7 +283,6 @@ async function setupFCMToken() {
             console.log('No registration token available.');
         }
         
-        // Handle foreground messages
         setupForegroundMessages();
         
     } catch (error) {
@@ -303,7 +320,6 @@ function setupForegroundMessages() {
     onMessage(messaging, (payload) => {
         console.log('Received foreground message: ', payload);
         
-        // Only show notification if the app is in background or user is not in the same room
         if (document.hidden || payload.data?.roomId !== currentRoomId) {
             showLocalNotification(payload);
         }
@@ -328,7 +344,6 @@ function showLocalNotification(payload) {
             window.focus();
             notification.close();
             
-            // Navigate to the room if needed
             if (payload.data?.roomId && payload.data.roomId !== currentRoomId) {
                 joinRoomById(payload.data.roomId);
             }
@@ -338,6 +353,8 @@ function showLocalNotification(payload) {
 
 // Update notification UI
 function updateNotificationUI(status) {
+    if (!notificationBtn) return;
+    
     if (status === 'granted') {
         notificationBtn.classList.add('has-notifications');
         notificationBtn.title = 'Notifications enabled';
@@ -349,7 +366,6 @@ function updateNotificationUI(status) {
 
 // Setup notification handler for incoming messages
 function setupNotificationHandler() {
-    // Listen for messages and show notifications
     if (currentUser) {
         setupMessageNotifications();
     }
@@ -362,12 +378,10 @@ function setupMessageNotifications() {
             if (change.type === 'added') {
                 const message = change.doc.data();
                 
-                // Don't notify for own messages or if in the same room
                 if (message.username === currentUser.userId || message.roomId === currentRoomId) {
                     return;
                 }
                 
-                // Show notification for new messages in other rooms
                 if (document.hidden || message.roomId !== currentRoomId) {
                     showMessageNotification(message);
                 }
@@ -382,10 +396,8 @@ function showMessageNotification(message) {
     const title = `New message in ${roomName}`;
     const body = `${message.userDisplayName || message.username}: ${message.text}`;
     
-    // Show in-app notification
     showInAppNotification(title, body, message.roomId);
     
-    // Show browser notification if permitted
     if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
         const notification = new Notification(title, {
             body: body.length > 100 ? body.substring(0, 100) + '...' : body,
@@ -399,7 +411,6 @@ function showMessageNotification(message) {
             window.focus();
             notification.close();
             
-            // Navigate to the room
             if (message.roomId !== currentRoomId) {
                 joinRoomById(message.roomId);
             }
@@ -409,6 +420,8 @@ function showMessageNotification(message) {
 
 // Show in-app notification
 function showInAppNotification(title, body, roomId) {
+    if (!pushNotificationContainer) return;
+    
     const notification = document.createElement('div');
     notification.className = 'push-notification';
     notification.innerHTML = `
@@ -426,7 +439,6 @@ function showInAppNotification(title, body, roomId) {
     
     pushNotificationContainer.appendChild(notification);
     
-    // Auto remove after 5 seconds
     setTimeout(() => {
         if (notification.parentElement) {
             notification.remove();
@@ -469,12 +481,10 @@ async function sendPushNotification(message, roomData) {
     if (!roomData || !roomData.members) return;
     
     try {
-        // Get FCM tokens of all room members except the sender
         const membersToNotify = roomData.members.filter(member => member !== currentUser.userId);
         
         if (membersToNotify.length === 0) return;
         
-        // Create notification in database
         await addDoc(collection(db, 'notifications'), {
             type: 'new_message',
             roomId: currentRoomId,
@@ -515,6 +525,70 @@ async function sendTestNotification() {
     }
 }
 
+// Security utilities
+const SecurityUtils = {
+    sanitizeInput: (input) => {
+        if (typeof input !== 'string') return '';
+        return input
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#x27;')
+            .replace(/\//g, '&#x2F;')
+            .trim();
+    },
+
+    validateEmail: (email) => {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(email);
+    },
+
+    validatePassword: (password) => {
+        return password.length >= 8 && 
+               /[A-Z]/.test(password) && 
+               /[a-z]/.test(password) && 
+               /[0-9]/.test(password);
+    }
+};
+
+// Connection monitoring
+function setupConnectionMonitoring() {
+    const statusElement = document.getElementById('connectionStatus');
+    if (!statusElement) return;
+    
+    const updateConnectionStatus = (online) => {
+        if (online) {
+            statusElement.innerHTML = '<i class="fas fa-wifi"></i> Online';
+            statusElement.className = 'connection-status online';
+            setTimeout(() => {
+                statusElement.style.display = 'none';
+            }, 3000);
+        } else {
+            statusElement.innerHTML = '<i class="fas fa-wifi-slash"></i> Offline - Reconnecting...';
+            statusElement.className = 'connection-status offline';
+            statusElement.style.display = 'block';
+        }
+    };
+
+    window.addEventListener('online', () => updateConnectionStatus(true));
+    window.addEventListener('offline', () => updateConnectionStatus(false));
+    
+    updateConnectionStatus(navigator.onLine);
+}
+
+// Debounce utility function
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
 // Setup event listeners
 function setupEventListeners() {
     // Auth tab switching
@@ -526,110 +600,170 @@ function setupEventListeners() {
     });
 
     // Form submissions
-    loginForm.addEventListener('submit', handleLogin);
-    registerForm.addEventListener('submit', handleRegister);
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleLogin);
+    }
+    if (registerForm) {
+        registerForm.addEventListener('submit', handleRegister);
+    }
 
     // User ID validation
-    regUserId.addEventListener('blur', checkUserIdAvailability);
+    if (regUserId) {
+        regUserId.addEventListener('blur', checkUserIdAvailability);
+    }
 
     // Password confirmation validation
-    regConfirmPassword.addEventListener('input', validatePasswordConfirmation);
+    if (regConfirmPassword) {
+        regConfirmPassword.addEventListener('input', validatePasswordConfirmation);
+    }
 
     // Logout
-    logoutBtn.addEventListener('click', handleLogout);
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', handleLogout);
+    }
 
     // Mobile menu
-    mobileMenuBtn.addEventListener('click', toggleSidebar);
+    if (mobileMenuBtn) {
+        mobileMenuBtn.addEventListener('click', toggleSidebar);
+    }
 
     // Search users
-    searchUsers.addEventListener('input', handleSearchUsers);
+    if (searchUsers) {
+        searchUsers.addEventListener('input', debounce(handleSearchUsers, PERFORMANCE_CONFIG.DEBOUNCE_DELAY));
+    }
 
     // Notification button
-    notificationBtn.addEventListener('click', () => {
-        notificationModal.style.display = 'flex';
-    });
+    if (notificationBtn) {
+        notificationBtn.addEventListener('click', () => {
+            if (notificationModal) {
+                notificationModal.style.display = 'flex';
+            }
+        });
+    }
 
     // Test notification button
-    testNotificationBtn.addEventListener('click', testNotification);
+    if (testNotificationBtn) {
+        testNotificationBtn.addEventListener('click', testNotification);
+    }
 
     // Close modals
     document.querySelectorAll('.close').forEach(closeBtn => {
         closeBtn.addEventListener('click', (e) => {
-            e.target.closest('.modal').style.display = 'none';
+            const modal = e.target.closest('.modal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
         });
     });
 
     // Dropdown menu
-    menuBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        dropdownContent.classList.toggle('show');
-        if (dropdownContent.classList.contains('show') && currentRoomId) {
-            loadRoomMembers();
-        }
-    });
+    if (menuBtn) {
+        menuBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (dropdownContent) {
+                dropdownContent.classList.toggle('show');
+                if (dropdownContent.classList.contains('show') && currentRoomId) {
+                    loadRoomMembers();
+                }
+            }
+        });
+    }
 
-    closeDropdown.addEventListener('click', () => {
-        dropdownContent.classList.remove('show');
-    });
+    if (closeDropdown) {
+        closeDropdown.addEventListener('click', () => {
+            if (dropdownContent) {
+                dropdownContent.classList.remove('show');
+            }
+        });
+    }
 
     // Close dropdown when clicking outside
     document.addEventListener('click', (e) => {
-        if (!menuBtn.contains(e.target) && !dropdownContent.contains(e.target)) {
+        if (menuBtn && dropdownContent && 
+            !menuBtn.contains(e.target) && !dropdownContent.contains(e.target)) {
             dropdownContent.classList.remove('show');
         }
     });
 
     // Existing chat event listeners
-    createRoomBtn.addEventListener('click', () => {
-        if (!currentUser) {
-            alert('Please login first');
-            return;
-        }
-        roomModal.style.display = 'flex';
-        newRoomName.focus();
-    });
-
-    confirmCreateRoom.addEventListener('click', createPrivateRoom);
-    cancelCreateRoom.addEventListener('click', () => {
-        roomModal.style.display = 'none';
-        newRoomName.value = '';
-    });
-
-    joinRoomBtn.addEventListener('click', joinRoomByCode);
-    roomCodeInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') joinRoomByCode();
-    });
-
-    sendButton.addEventListener('click', sendMessage);
-    messageInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') sendMessage();
-    });
-
-    // Draft message functionality
-    messageInput.addEventListener('input', () => {
-        if (currentRoomId && currentUser) {
-            updateTypingStatus();
-            saveDraftMessage();
-        }
-    });
-
-    reactionBtn.addEventListener('click', () => {
-        reactionPicker.style.display = reactionPicker.style.display === 'none' ? 'flex' : 'none';
-    });
-
-    document.querySelectorAll('.reaction-option').forEach(option => {
-        option.addEventListener('click', (e) => {
-            const emoji = e.target.getAttribute('data-emoji');
-            reactionPicker.style.display = 'none';
+    if (createRoomBtn) {
+        createRoomBtn.addEventListener('click', () => {
+            if (!currentUser) {
+                alert('Please login first');
+                return;
+            }
+            if (roomModal) {
+                roomModal.style.display = 'flex';
+                if (newRoomName) {
+                    newRoomName.focus();
+                }
+            }
         });
-    });
+    }
 
-    // Close reaction picker when clicking outside
-    document.addEventListener('click', (e) => {
-        if (!reactionBtn.contains(e.target) && !reactionPicker.contains(e.target)) {
-            reactionPicker.style.display = 'none';
-        }
-    });
+    if (confirmCreateRoom) {
+        confirmCreateRoom.addEventListener('click', createPrivateRoom);
+    }
+
+    if (cancelCreateRoom) {
+        cancelCreateRoom.addEventListener('click', () => {
+            if (roomModal) {
+                roomModal.style.display = 'none';
+                if (newRoomName) {
+                    newRoomName.value = '';
+                }
+            }
+        });
+    }
+
+    if (joinRoomBtn) {
+        joinRoomBtn.addEventListener('click', joinRoomByCode);
+    }
+
+    if (roomCodeInput) {
+        roomCodeInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') joinRoomByCode();
+        });
+    }
+
+    if (sendButton) {
+        sendButton.addEventListener('click', sendMessage);
+    }
+
+    if (messageInput) {
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // Draft message functionality
+        messageInput.addEventListener('input', () => {
+            if (currentRoomId && currentUser) {
+                updateTypingStatus();
+                saveDraftMessage();
+            }
+        });
+    }
+
+    if (reactionBtn && reactionPicker) {
+        reactionBtn.addEventListener('click', () => {
+            reactionPicker.style.display = reactionPicker.style.display === 'none' ? 'flex' : 'none';
+        });
+
+        document.querySelectorAll('.reaction-option').forEach(option => {
+            option.addEventListener('click', (e) => {
+                const emoji = e.target.getAttribute('data-emoji');
+                reactionPicker.style.display = 'none';
+            });
+        });
+
+        // Close reaction picker when clicking outside
+        document.addEventListener('click', (e) => {
+            if (reactionBtn && reactionPicker && 
+                !reactionBtn.contains(e.target) && !reactionPicker.contains(e.target)) {
+                reactionPicker.style.display = 'none';
+            }
+        });
+    }
 
     // Close modals when clicking outside
     window.addEventListener('click', (e) => {
@@ -637,6 +771,11 @@ function setupEventListeners() {
             e.target.style.display = 'none';
         }
     });
+
+    // Delete room button
+    if (deleteRoomBtn) {
+        deleteRoomBtn.addEventListener('click', deleteRoom);
+    }
 }
 
 // Save draft message to localStorage
@@ -646,12 +785,10 @@ function saveDraftMessage() {
     const messageText = messageInput.value.trim();
     const draftKey = `draft_${currentUser.userId}_${currentRoomId}`;
     
-    // Clear previous timeout
     if (draftSaveTimeout) {
         clearTimeout(draftSaveTimeout);
     }
     
-    // Set new timeout to save after 1 second of inactivity
     draftSaveTimeout = setTimeout(() => {
         if (messageText) {
             localStorage.setItem(draftKey, messageText);
@@ -665,15 +802,20 @@ function saveDraftMessage() {
 
 // Show draft indicator
 function showDraftIndicator() {
+    if (!draftIndicator) return;
     draftIndicator.style.display = 'flex';
     setTimeout(() => {
-        draftIndicator.style.display = 'none';
+        if (draftIndicator) {
+            draftIndicator.style.display = 'none';
+        }
     }, 2000);
 }
 
 // Hide draft indicator
 function hideDraftIndicator() {
-    draftIndicator.style.display = 'none';
+    if (draftIndicator) {
+        draftIndicator.style.display = 'none';
+    }
 }
 
 // Load draft message from localStorage
@@ -683,9 +825,8 @@ function loadDraftMessage() {
     const draftKey = `draft_${currentUser.userId}_${currentRoomId}`;
     const draftMessage = localStorage.getItem(draftKey);
     
-    if (draftMessage) {
+    if (draftMessage && messageInput) {
         messageInput.value = draftMessage;
-        // Don't show indicator when loading draft
     }
 }
 
@@ -905,20 +1046,22 @@ function checkAuthState() {
 
 // Show authentication modal
 function showAuthModal() {
-    authModal.style.display = 'flex';
-    appContainer.style.display = 'none';
-    loadingScreen.style.display = 'none';
+    if (authModal) authModal.style.display = 'flex';
+    if (appContainer) appContainer.style.display = 'none';
+    if (loadingScreen) loadingScreen.style.display = 'none';
 }
 
 // Show main application
 function showApp() {
-    authModal.style.display = 'none';
-    appContainer.style.display = 'flex';
-    loadingScreen.style.display = 'none';
+    if (authModal) authModal.style.display = 'none';
+    if (appContainer) appContainer.style.display = 'flex';
+    if (loadingScreen) loadingScreen.style.display = 'none';
     
     // Update user info in sidebar
-    sidebarUserName.textContent = currentUser.name;
-    userProfilePic.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.name)}&background=3498db&color=fff`;
+    if (sidebarUserName) sidebarUserName.textContent = currentUser.name;
+    if (userProfilePic) {
+        userProfilePic.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.name)}&background=3498db&color=fff`;
+    }
     
     // Initialize chat features
     initializePublicRooms();
@@ -928,7 +1071,6 @@ function showApp() {
 // Handle logout
 function handleLogout() {
     if (currentUser) {
-        // Update user offline status
         updateUserPresence('offline');
     }
     
@@ -994,7 +1136,7 @@ async function handleSearchUsers(e) {
     const searchTerm = e.target.value.trim();
     
     if (!searchTerm) {
-        searchResults.style.display = 'none';
+        if (searchResults) searchResults.style.display = 'none';
         return;
     }
 
@@ -1008,17 +1150,21 @@ async function handleSearchUsers(e) {
 
         const querySnapshot = await getDocs(userIdQuery);
         
-        searchResults.innerHTML = '';
-        searchResults.style.display = 'block';
+        if (searchResults) {
+            searchResults.innerHTML = '';
+            searchResults.style.display = 'block';
+        }
 
         if (querySnapshot.empty) {
-            searchResults.innerHTML = '<div class="search-result-item">No users found</div>';
+            if (searchResults) {
+                searchResults.innerHTML = '<div class="search-result-item">No users found</div>';
+            }
             return;
         }
 
         querySnapshot.forEach((doc) => {
             const userData = doc.data();
-            if (userData.userId === currentUser.userId) return; // Don't show current user
+            if (userData.userId === currentUser.userId) return;
             
             const resultItem = document.createElement('div');
             resultItem.className = 'search-result-item';
@@ -1029,11 +1175,13 @@ async function handleSearchUsers(e) {
             `;
             resultItem.addEventListener('click', async () => {
                 await startPrivateChat(userData);
-                searchResults.style.display = 'none';
-                searchUsers.value = '';
+                if (searchResults) searchResults.style.display = 'none';
+                if (searchUsers) searchUsers.value = '';
             });
             
-            searchResults.appendChild(resultItem);
+            if (searchResults) {
+                searchResults.appendChild(resultItem);
+            }
         });
 
     } catch (error) {
@@ -1109,7 +1257,7 @@ function generatePrivateRoomId(userId1, userId2) {
 
 // Load room members for dropdown
 function loadRoomMembers() {
-    if (!currentRoomId || !currentRoomData) return;
+    if (!currentRoomId || !currentRoomData || !membersList) return;
 
     membersList.innerHTML = '';
 
@@ -1166,8 +1314,8 @@ async function createPrivateRoom() {
             isPrivateChat: false
         });
 
-        roomModal.style.display = 'none';
-        newRoomName.value = '';
+        if (roomModal) roomModal.style.display = 'none';
+        if (newRoomName) newRoomName.value = '';
         loadUserRooms();
         
         // Join the newly created room
@@ -1219,7 +1367,7 @@ async function joinRoomByCode() {
             });
         }
 
-        roomCodeInput.value = '';
+        if (roomCodeInput) roomCodeInput.value = '';
         joinRoom(roomData.code, roomData.name, roomData.type, roomData.creator, {
             id: roomDoc.id,
             ...roomData
@@ -1233,6 +1381,8 @@ async function joinRoomByCode() {
 
 // Initialize public rooms
 function initializePublicRooms() {
+    if (!publicRooms) return;
+    
     publicRooms.innerHTML = '';
     PUBLIC_ROOMS.forEach(room => {
         const roomElement = createRoomElement(room.id, room.name, 'public', '');
@@ -1242,7 +1392,7 @@ function initializePublicRooms() {
 
 // Load user's rooms (only rooms they've joined)
 async function loadUserRooms() {
-    if (!currentUser) return;
+    if (!currentUser || !privateRooms) return;
 
     try {
         const roomsQuery = query(
@@ -1318,23 +1468,27 @@ function joinRoom(roomId, roomName, roomType, creator, roomData = null) {
         }
     }
     
-    currentRoomName.textContent = displayName;
-    roomCodeDisplay.textContent = roomType === 'private' ? 
-        (roomData?.isPrivateChat ? 'Private Chat' : `Room Code: ${roomId}`) : 
-        'Public Room';
+    if (currentRoomName) currentRoomName.textContent = displayName;
+    if (roomCodeDisplay) {
+        roomCodeDisplay.textContent = roomType === 'private' ? 
+            (roomData?.isPrivateChat ? 'Private Chat' : `Room Code: ${roomId}`) : 
+            'Public Room';
+    }
     
     // Show/hide delete button for room creator
-    deleteRoomBtn.style.display = (currentRoomType === 'private' && currentRoomCreator === currentUser.userId && !roomData?.isPrivateChat) ? 'block' : 'none';
+    if (deleteRoomBtn) {
+        deleteRoomBtn.style.display = (currentRoomType === 'private' && currentRoomCreator === currentUser.userId && !roomData?.isPrivateChat) ? 'block' : 'none';
+    }
     
     // Enable input
-    messageInput.disabled = false;
-    sendButton.disabled = false;
-    reactionBtn.disabled = false;
+    if (messageInput) messageInput.disabled = false;
+    if (sendButton) sendButton.disabled = false;
+    if (reactionBtn) reactionBtn.disabled = false;
     
     // Load draft message for this room
     loadDraftMessage();
     
-    messageInput.focus();
+    if (messageInput) messageInput.focus();
     
     // Load messages
     loadMessages();
@@ -1355,12 +1509,16 @@ function joinRoom(roomId, roomName, roomType, creator, roomData = null) {
 
 // Load messages
 function loadMessages() {
+    if (!messagesContainer) return;
+    
     messagesContainer.innerHTML = '<div class="loading">Loading messages...</div>';
     
     const messagesQuery = query(collection(db, 'messages'), orderBy('timestamp', 'asc'));
 
     messageListener = onSnapshot(messagesQuery, 
         (snapshot) => {
+            if (!messagesContainer) return;
+            
             messagesContainer.innerHTML = '';
             
             if (snapshot.empty) {
@@ -1397,17 +1555,21 @@ function loadMessages() {
         },
         (error) => {
             console.error('Error loading messages:', error);
-            messagesContainer.innerHTML = `
-                <div class="error">
-                    <p>Error loading messages: ${error.message}</p>
-                </div>
-            `;
+            if (messagesContainer) {
+                messagesContainer.innerHTML = `
+                    <div class="error">
+                        <p>Error loading messages: ${error.message}</p>
+                    </div>
+                `;
+            }
         }
     );
 }
 
 // Display message
 function displayMessage(message, messageId) {
+    if (!messagesContainer) return;
+    
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${message.username === currentUser.userId ? 'own' : 'other'}`;
     messageDiv.id = messageId;
@@ -1478,6 +1640,8 @@ async function deleteMessage(messageId) {
 
 // Setup typing indicator
 function setupTypingIndicator() {
+    if (!typingIndicator) return;
+    
     const typingRef = collection(db, 'typing');
     
     typingListener = onSnapshot(
@@ -1498,11 +1662,13 @@ function setupTypingIndicator() {
                 }
             });
             
-            if (typingUsers.length > 0) {
-                const names = typingUsers.join(', ');
-                typingIndicator.textContent = `${names} ${typingUsers.length === 1 ? 'is' : 'are'} typing...`;
-            } else {
-                typingIndicator.textContent = '';
+            if (typingIndicator) {
+                if (typingUsers.length > 0) {
+                    const names = typingUsers.join(', ');
+                    typingIndicator.textContent = `${names} ${typingUsers.length === 1 ? 'is' : 'are'} typing...`;
+                } else {
+                    typingIndicator.textContent = '';
+                }
             }
         }
     );
@@ -1529,7 +1695,7 @@ async function updateTypingStatus() {
     }, 2000);
 }
 
-// Modified sendMessage function to include notifications and draft clearing
+// Send message function
 async function sendMessage() {
     const messageText = messageInput.value.trim();
     
@@ -1537,8 +1703,10 @@ async function sendMessage() {
         return;
     }
 
-    sendButton.disabled = true;
-    sendButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    if (sendButton) {
+        sendButton.disabled = true;
+        sendButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    }
 
     try {
         await addDoc(collection(db, 'messages'), {
@@ -1558,20 +1726,22 @@ async function sendMessage() {
             await sendPushNotification({ text: messageText }, currentRoomData);
         }
         
-        messageInput.value = '';
-        messageInput.focus();
-        reactionPicker.style.display = 'none';
+        if (messageInput) messageInput.value = '';
+        if (messageInput) messageInput.focus();
+        if (reactionPicker) reactionPicker.style.display = 'none';
     } catch (error) {
         console.error('Error sending message:', error);
         alert('Error sending message. Please try again.');
     } finally {
-        sendButton.disabled = false;
-        sendButton.innerHTML = '<i class="fas fa-paper-plane"></i>';
+        if (sendButton) {
+            sendButton.disabled = false;
+            sendButton.innerHTML = '<i class="fas fa-paper-plane"></i>';
+        }
     }
 }
 
 // Delete room function
-deleteRoomBtn.addEventListener('click', async () => {
+async function deleteRoom() {
     if (currentRoomType !== 'private' || currentRoomCreator !== currentUser.userId) {
         alert('Only the room creator can delete this room');
         return;
@@ -1616,26 +1786,28 @@ deleteRoomBtn.addEventListener('click', async () => {
         
         // Clear current room
         currentRoomId = '';
-        currentRoomName.textContent = 'Select a Room';
-        roomCodeDisplay.textContent = '';
-        messagesContainer.innerHTML = `
-            <div class="welcome-message">
-                <i class="fas fa-comments fa-3x"></i>
-                <h3>Room deleted successfully</h3>
-                <p>Select another room to continue chatting</p>
-            </div>
-        `;
+        if (currentRoomName) currentRoomName.textContent = 'Select a Room';
+        if (roomCodeDisplay) roomCodeDisplay.textContent = '';
+        if (messagesContainer) {
+            messagesContainer.innerHTML = `
+                <div class="welcome-message">
+                    <i class="fas fa-comments fa-3x"></i>
+                    <h3>Room deleted successfully</h3>
+                    <p>Select another room to continue chatting</p>
+                </div>
+            `;
+        }
         
-        deleteRoomBtn.style.display = 'none';
-        messageInput.disabled = true;
-        sendButton.disabled = true;
-        reactionBtn.disabled = true;
+        if (deleteRoomBtn) deleteRoomBtn.style.display = 'none';
+        if (messageInput) messageInput.disabled = true;
+        if (sendButton) sendButton.disabled = true;
+        if (reactionBtn) reactionBtn.disabled = true;
         
     } catch (error) {
         console.error('Error deleting room:', error);
         alert('Error deleting room. Please try again.');
     }
-});
+}
 
 // Initialize the application when the page loads
 document.addEventListener('DOMContentLoaded', initApp);
